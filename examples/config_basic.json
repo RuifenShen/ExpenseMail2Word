@@ -1,0 +1,16 @@
+{
+  "email": {
+    "server": "imap.qq.com",
+    "port": 993,
+    "username": "your-email@qq.com",
+    "password": "your-auth-code",
+    "use_ssl": true,
+    "timeout": 30
+  },
+  "search": {
+    "senders": ["didifapiao@mailgate.xiaojukeji.com", "12306@rails.com.cn", "itinerary@ridesharing.amap.com"],
+    "date_from": "2025-10-01",
+    "date_to": "2026-03-16",
+    "has_attachments": true
+  },
+}
