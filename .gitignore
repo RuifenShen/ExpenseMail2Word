@@ -1,0 +1,28 @@
+# Output
+output/
+test_output/
+processed/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Config with credentials (use examples/config_basic.json as template)
+test_config*.json
+config_*.json
+!examples/*.json
+
+# Intermediate files
+emails.json
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
