@@ -61,6 +61,34 @@ def _find_trip_crop_rect(page):
         min(content_bottom + margin, page.rect.height)
     )
 
+def _find_third_party_crop_rect(page):
+    """检测首汽约车等第三方网约车行程单内容边界，去除顶部和底部空白。"""
+    blocks = page.get_text('blocks')
+    content_top = None
+    content_bottom = 0
+
+    for b in blocks:
+        txt = b[4].strip()
+        if not txt:
+            continue
+        if any(kw in txt for kw in ['首汽约车', '第三方网约车', '行程单', '行程起止日期']):
+            if content_top is None:
+                content_top = b[1]
+        if content_top is not None and '页码' not in txt:
+            content_bottom = max(content_bottom, b[3])
+
+    if content_top is None:
+        return None
+
+    margin = 15
+    return fitz.Rect(
+        page.rect.x0,
+        max(0, content_top - 5),
+        page.rect.x1,
+        min(content_bottom + margin, page.rect.height)
+    )
+
+
 def _find_amap_crop_rect(page):
     """检测高德行程单内容边界，去除顶部广告横幅和底部空白。"""
     blocks = page.get_text('blocks')
@@ -106,6 +134,8 @@ def convert_pdf_to_image(pdf_path, output_dir, dpi=150, crop_type=None):
                 clip = _find_trip_crop_rect(page)
             elif crop_type == 'amap':
                 clip = _find_amap_crop_rect(page)
+            elif crop_type == 'third_party':
+                clip = _find_third_party_crop_rect(page)
 
             pix = page.get_pixmap(matrix=mat, clip=clip) if clip else page.get_pixmap(matrix=mat)
 
@@ -150,12 +180,19 @@ def create_summary_table(doc, extractions):
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.allow_autofit = True
+
     tbl_pr = table._tbl.tblPr
     tbl_w = tbl_pr.find(qn('w:tblW'))
     if tbl_w is None:
         tbl_w = etree.SubElement(tbl_pr, qn('w:tblW'))
     tbl_w.set(qn('w:type'), 'auto')
     tbl_w.set(qn('w:w'), '0')
+
+    # 自适应列宽：设置 tblLayout=autofit，每个单元格宽度设为 auto
+    tbl_layout = tbl_pr.find(qn('w:tblLayout'))
+    if tbl_layout is None:
+        tbl_layout = etree.SubElement(tbl_pr, qn('w:tblLayout'))
+    tbl_layout.set(qn('w:type'), 'autofit')
 
     hdr_cells = table.rows[0].cells
     for i, header in enumerate(headers):
@@ -184,6 +221,14 @@ def create_summary_table(doc, extractions):
             start = ex.get('start_location', '')
             end = ex.get('end_location', '')
             label = '高德'
+        elif etype == 'third_party':
+            start = ex.get('start_location', '')
+            end = ex.get('end_location', '')
+            label = '第三方'
+        elif etype in ('dining', '餐饮', '酒店', '机票', '其他发票'):
+            start = ex.get('seller_name', '') or ex.get('restaurant_name', '')
+            end = ''
+            label = ex.get('type', '餐饮') if ex.get('type') != 'dining' else '餐饮'
         else:
             start = ex.get('start_location', '')
             end = ex.get('end_location', '')
@@ -207,6 +252,16 @@ def create_summary_table(doc, extractions):
         for p in cell.paragraphs:
             for run in p.runs:
                 run.font.bold = True
+
+    # 将所有单元格宽度设为 auto，配合 tblLayout=autofit 实现按内容自适应列宽
+    for row in table.rows:
+        for cell in row.cells:
+            tc_w = cell._element.find(qn('w:tcPr'))
+            if tc_w is not None:
+                w_el = tc_w.find(qn('w:tcW'))
+                if w_el is not None:
+                    w_el.set(qn('w:type'), 'auto')
+                    w_el.set(qn('w:w'), '0')
 
 def add_images_to_doc(doc, image_paths, max_width=6.0, keep_together=False):
     """向文档添加图片（紧凑布局，配对图片尽量同页）"""
@@ -291,12 +346,17 @@ def create_summary_document(info_file, pdf_dir, output_path, config=None):
 
     extractions = data.get('extractions', [])
 
-    # 根据日期排序（支持 date / date_asc / date_desc，与 test_config 等兼容）
+    # 根据日期排序，与 process_expense 一致：(date, pair_id, 行程单优先于发票)
     sort_by = default_doc_config.get('sort_by')
+    def _sort_key(x):
+        d = x.get('date', '')
+        p = x.get('pair_id', '')
+        doc = 1 if x.get('doc_type') == '发票' else 0
+        return (d, p, doc)
     if sort_by in ('date', 'date_asc'):
-        extractions.sort(key=lambda x: x.get('date', ''))
+        extractions.sort(key=_sort_key)
     elif sort_by == 'date_desc':
-        extractions.sort(key=lambda x: x.get('date', ''), reverse=True)
+        extractions.sort(key=_sort_key, reverse=True)
 
     # 创建Word文档
     doc = Document()
@@ -321,7 +381,7 @@ def create_summary_document(info_file, pdf_dir, output_path, config=None):
     # 添加统计摘要
     add_summary_stats(doc, extractions)
 
-    # 转换PDF为图片并添加到文档（配对的行程单+发票贴在一起）
+    # 转换PDF为图片并添加到文档（配对的行程单+发票连续粘贴，顺序与表格一致）
     if default_doc_config.get('include_images'):
         import shutil
         temp_img_dir = Path(output_path).parent / "temp_images"
@@ -331,37 +391,42 @@ def create_summary_document(info_file, pdf_dir, output_path, config=None):
         dpi = default_proc_config['image'].get('dpi', 150)
         max_w = default_proc_config['image'].get('width_inches', 6.0)
         added_pairs = set()
+        added_files = set()
 
-        for extraction in extractions:
-            pair_id = extraction.get('pair_id', '')
-            if pair_id and pair_id in added_pairs:
-                continue
+        def _get_crop_type(ext):
+            if ext.get('doc_type') == '行程单':
+                t = ext.get('type')
+                return t if t in ('didi', 'amap', 'third_party') else None
+            return None
 
-            pdf_file = pdf_path / Path(extraction['filepath']).name
-            if not pdf_file.exists():
-                logging.warning(f"未找到PDF文件: {pdf_file}")
-                continue
-
-            def _get_crop_type(ext):
-                if ext.get('doc_type') == '行程单':
-                    return ext.get('type')  # 'didi' or 'amap'
-                return None
-
-            image_paths = convert_pdf_to_image(
-                pdf_file, temp_img_dir, dpi=dpi, crop_type=_get_crop_type(extraction))
-            is_paired = False
-
+        expense_items = [ex for ex in extractions if not (ex.get('doc_type') == '发票' and ex.get('pair_id'))]
+        for ex in expense_items:
+            pair_id = ex.get('pair_id', '')
             if pair_id:
-                is_paired = True
-                paired = [e for e in extractions if e.get('pair_id') == pair_id and e is not extraction]
-                for p in paired:
-                    p_file = pdf_path / Path(p['filepath']).name
-                    if p_file.exists():
+                if pair_id in added_pairs:
+                    continue
+                group = [e for e in extractions if e.get('pair_id') == pair_id]
+                group.sort(key=lambda e: (1 if e.get('doc_type') == '发票' else 0))
+                image_paths = []
+                for g in group:
+                    g_file = pdf_path / Path(g['filepath']).name
+                    if g_file.exists() and g_file.name not in added_files:
                         image_paths.extend(convert_pdf_to_image(
-                            p_file, temp_img_dir, dpi=dpi, crop_type=_get_crop_type(p)))
+                            g_file, temp_img_dir, dpi=dpi, crop_type=_get_crop_type(g)))
+                        added_files.add(g_file.name)
                 added_pairs.add(pair_id)
-
-            add_images_to_doc(doc, image_paths, max_w, keep_together=is_paired)
+                add_images_to_doc(doc, image_paths, max_w, keep_together=True)
+            else:
+                pdf_file = pdf_path / Path(ex['filepath']).name
+                if not pdf_file.exists():
+                    logging.warning(f"未找到PDF文件: {pdf_file}")
+                    continue
+                if pdf_file.name in added_files:
+                    continue
+                image_paths = convert_pdf_to_image(
+                    pdf_file, temp_img_dir, dpi=dpi, crop_type=_get_crop_type(ex))
+                added_files.add(pdf_file.name)
+                add_images_to_doc(doc, image_paths, max_w, keep_together=False)
 
         shutil.rmtree(temp_img_dir)
 

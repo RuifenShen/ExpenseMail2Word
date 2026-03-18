@@ -58,8 +58,10 @@
   "search": {
     "senders": ["didifapiao@mailgate.xiaojukeji.com"],
     "subjects": ["电子发票", "行程报销单"],
-    "date_from": "2025-10-01",
-    "date_to": "2026-03-16",
+    "email_send_date_from": "2025-10-01",
+    "email_send_date_to": "2026-03-16",
+    "trip_date_from": "",
+    "trip_date_to": "",
     "has_attachments": true
   },
   "processing": {
@@ -115,8 +117,8 @@
 {
   "search_criteria": {
     "senders": ["didifapiao@mailgate.xiaojukeji.com"],
-    "date_from": "2025-10-01",
-    "date_to": "2026-03-16"
+    "email_send_date_from": "2025-10-01",
+    "email_send_date_to": "2026-03-16"
   },
   "results": [
     {

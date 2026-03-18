@@ -4,8 +4,20 @@
 
 import json
 import logging
+import re
 from datetime import datetime
 from imapclient import IMAPClient
+
+
+def normalize_date(s):
+    """将用户输入的日期规范化为 YYYY-MM-DD，单数字月/日自动补零。如 2025-8-12 -> 2025-08-12"""
+    if not s or not str(s).strip():
+        return (s or '').strip()
+    s = str(s).strip()
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return s
 
 
 def connect_to_email(config):
@@ -32,9 +44,9 @@ def format_search_criteria(search_config):
     """格式化搜索条件"""
     criteria = []
 
-    # 日期范围
-    date_from = search_config.get('date_from')
-    date_to = search_config.get('date_to')
+    # 邮件发送日期范围（单数字月/日自动补零）
+    date_from = normalize_date(search_config.get('email_send_date_from') or search_config.get('date_from'))
+    date_to = normalize_date(search_config.get('email_send_date_to') or search_config.get('date_to'))
 
     if date_from:
         from_date = datetime.strptime(date_from, '%Y-%m-%d').strftime('%d-%b-%Y')

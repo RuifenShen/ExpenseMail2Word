@@ -52,10 +52,18 @@ def _decode_mime_words(s):
 
 
 def _build_date_criteria(search_config):
-    """构建日期范围条件"""
+    """构建邮件发送日期范围条件。单数字月/日自动补零（如 2025-8-12 -> 2025-08-12）。"""
+    import re
+    def _norm(s):
+        if not s or not str(s).strip():
+            return (s or '').strip()
+        s = str(s).strip()
+        m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', s)
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}" if m else s
+
     criteria = []
-    date_from = search_config.get('date_from')
-    date_to = search_config.get('date_to')
+    date_from = _norm(search_config.get('email_send_date_from') or search_config.get('date_from'))
+    date_to = _norm(search_config.get('email_send_date_to') or search_config.get('date_to'))
 
     if date_from:
         from_date = datetime.strptime(date_from, '%Y-%m-%d').strftime('%d-%b-%Y')
@@ -78,25 +86,50 @@ def search_emails(client, config):
     senders = search_config.get('senders', [])
     subjects = search_config.get('subjects', [])
 
-    # QQ IMAP 的 FROM + SINCE/BEFORE 组合搜索有 bug（单独都正常，组合返回 0），
-    # 解决方案：分别搜索日期和发件人，在 Python 中取交集
-    # SUBJECT + 日期可以正常组合，放在 base_criteria 中
-    base_criteria = _build_date_criteria(search_config)
-    for subject in subjects:
-        base_criteria.extend(['SUBJECT', subject])
-    if not base_criteria:
-        base_criteria = ['ALL']
+    # subjects 与 senders 是 OR 关系：匹配任一主题关键词 或 任一发件人的邮件均纳入结果
+    # QQ IMAP 的 FROM + SINCE/BEFORE 组合搜索有 bug，发件人需单独搜索再与日期取交集
+    # SUBJECT + 日期可以正常组合
+    date_criteria = _build_date_criteria(search_config)
 
-    if senders:
-        base_uids = set(client.search(base_criteria))
-        sender_uids = set()
-        for sender in senders:
-            result = client.search(['FROM', sender])
-            logging.debug(f"发件人 {sender}: {len(result)} 封")
-            sender_uids.update(result)
-        uids = sorted(base_uids & sender_uids)
+    if subjects or senders:
+        all_uids = set()
+
+        if subjects:
+            # QQ IMAP 不支持 UTF-8 literal 的 SUBJECT 搜索，
+            # 改为按日期搜索后在 Python 端按主题过滤
+            date_only = list(date_criteria) if date_criteria else ['ALL']
+            candidate_uids = client.search(date_only)
+            logging.debug(f"日期范围内共 {len(candidate_uids)} 封，开始按主题过滤...")
+
+            if candidate_uids:
+                fetch_data = client.fetch(candidate_uids, ['BODY[HEADER.FIELDS (SUBJECT)]'])
+                for uid in candidate_uids:
+                    if uid not in fetch_data:
+                        continue
+                    raw_subject = fetch_data[uid].get(b'BODY[HEADER.FIELDS (SUBJECT)]', b'')
+                    subject_str = _decode_mime_words(
+                        raw_subject.decode('utf-8', errors='ignore').replace('Subject:', '').strip()
+                    )
+                    for subject_entry in subjects:
+                        keywords = subject_entry if isinstance(subject_entry, list) else [subject_entry]
+                        if all(kw in subject_str for kw in keywords):
+                            all_uids.add(uid)
+                            logging.debug(f"主题匹配: uid={uid}, subject='{subject_str[:60]}'")
+                            break
+
+        if senders:
+            date_uids = set(client.search(date_criteria)) if date_criteria else None
+            for sender in senders:
+                result = client.search(['FROM', sender])
+                logging.debug(f"发件人 {sender}: {len(result)} 封")
+                if date_uids is not None:
+                    all_uids.update(set(result) & date_uids)
+                else:
+                    all_uids.update(result)
+
+        uids = sorted(all_uids)
     else:
-        uids = client.search(base_criteria)
+        uids = client.search(date_criteria if date_criteria else ['ALL'])
 
     if not uids:
         logging.info("未找到符合条件的邮件")

@@ -170,6 +170,10 @@ def download_attachments_from_list(emails, config, output_dir):
 
         try:
             attachments = extract_attachments(client, msg_id, output_dir)
+            for att in attachments:
+                att['email_subject'] = email_data.get('subject', '')
+                att['email_date'] = email_data.get('date', '')
+                att['email_from'] = email_data.get('from', '')
             all_attachments.extend(attachments)
         except Exception as e:
             logging.error(f"处理邮件 {msg_id} 时出错: {str(e)}")

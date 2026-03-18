@@ -71,6 +71,16 @@ def generate_new_filename(info, processing_config=None):
 
         new_name = f"{date_str}_滴滴_{start}_{end}_{doc_type}.pdf"
 
+    elif info['type'] == 'third_party':
+        date_str = info.get('date', '').replace('-', '').replace('.', '')
+        if not date_str:
+            date_str = _date_fallback(info['filepath'])
+
+        start = info.get('start_location', '').replace(' ', '')[:10] or '未知'
+        end = info.get('end_location', '').replace(' ', '')[:10] or '未知'
+
+        new_name = f"{date_str}_首汽约车_{start}_{end}_行程单.pdf"
+
     elif info['type'] == 'amap':
         date_str = info.get('date', '').replace('-', '').replace('.', '')
         if not date_str:
@@ -89,6 +99,22 @@ def generate_new_filename(info, processing_config=None):
                 doc_type = '行程'
 
         new_name = f"{date_str}_高德_{start}_{end}_{doc_type}.pdf"
+
+    elif info['type'] in ('dining', '餐饮', '酒店', '机票', '其他发票'):
+        date_str = info.get('date', '').replace('-', '').replace('.', '')
+        if not date_str:
+            date_str = _date_fallback(info['filepath'])
+
+        inv_type = info.get('type', '发票')
+        if inv_type == 'dining':
+            inv_type = '餐饮'
+        if inv_type == '机票' and info.get('pair_id') and (info.get('start_location') or info.get('end_location')):
+            start = (info.get('start_location', '') or '').replace(' ', '')[:10] or '未知'
+            end = (info.get('end_location', '') or '').replace(' ', '')[:10] or '未知'
+            new_name = f"{date_str}_首汽约车_{start}_{end}_发票.pdf"
+        else:
+            seller = (info.get('seller_name', '') or info.get('restaurant_name', '')).replace(' ', '')[:20] or '未知'
+            new_name = f"{date_str}_{inv_type}_{seller}.pdf"
     else:
         # 对于未知类型的文件，使用基本命名规则
         date_str = info.get('date', '').replace('-', '')
