@@ -19,6 +19,10 @@
 
 ```bash
 pip install pdfplumber PyMuPDF python-docx imapclient lxml
+
+或者 
+
+pip install -r requirements.txt
 ```
 
 ### 2. 配置
