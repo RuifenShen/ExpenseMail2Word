@@ -84,6 +84,17 @@ python scripts/process_expense.py --config config.json --output ./output
 - 本项目已考虑多平台兼容，支持Windows / macOS / Linux，路径与配置文件使用 `pathlib` 处理
 - 但是尽在Linux平台使用过
 
+## 回归测试
+
+已修复的 bug 有对应回归用例，修改代码后可运行：
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+详见 [REGRESSION.md](REGRESSION.md)。
+
 ## 详细文档
 
 更多说明（PDF 解析规则、重命名格式、高级配置、扩展开发）见 [SKILL.md](SKILL.md)。

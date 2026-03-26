@@ -66,6 +66,35 @@ def _extract_restaurant_name(subject):
     return max(parts, key=len) if parts else '未知餐饮'
 
 
+def dedup_expense_items(items):
+    """去重逻辑：滴滴/高德/第三方网约车按 (type, doc_type, date, start_location, end_location, amount) 去重。
+    回归用例：同起点、同金额、不同终点的行程不应被误去重。"""
+    def _dedup_key(item):
+        t = item.get('type', '')
+        doc = item.get('doc_type', '')
+        d = item.get('date', '')
+        amt = f"{item.get('amount', 0):.2f}"
+        if t == '12306':
+            return (t, d, item.get('train_number', ''), amt)
+        if t in ('dining', '餐饮', '酒店', '机票', '其他发票'):
+            return (t, d, item.get('seller_name', item.get('restaurant_name', '')), amt)
+        if t in ('didi', 'amap', 'third_party'):
+            start_loc = item.get('start_location', '') or item.get('departure', '')
+            end_loc = item.get('end_location', '') or item.get('destination', '')
+            return (t, doc, d, start_loc, end_loc, amt)
+        return (t, doc, d, amt, item.get('original_filename', ''))
+
+    seen_keys = set()
+    deduped = []
+    for item in items:
+        key = _dedup_key(item)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(item)
+    return deduped
+
+
 def setup_logging(verbose=False):
     """设置日志记录"""
     level = logging.DEBUG if verbose else logging.INFO
@@ -176,30 +205,7 @@ def run_complete_process(config, output_dir, processing_type=None):
                 continue
 
         # 步骤3.5: 去重（重复邮件可能导致同一凭证被多次下载）
-        def _dedup_key(item):
-            t = item.get('type', '')
-            doc = item.get('doc_type', '')
-            d = item.get('date', '')
-            amt = f"{item.get('amount', 0):.2f}"
-            if t == '12306':
-                return (t, d, item.get('train_number', ''), amt)
-            if t in ('dining', '餐饮', '酒店', '机票', '其他发票'):
-                return (t, d, item.get('seller_name', item.get('restaurant_name', '')), amt)
-            if t in ('didi', 'amap', 'third_party'):
-                start_loc = item.get('start_location', '') or item.get('departure', '')
-                end_loc = item.get('end_location', '') or item.get('destination', '')
-                return (t, doc, d, start_loc, end_loc, amt)
-            return (t, doc, d, amt, item.get('original_filename', ''))
-
-        seen_keys = set()
-        deduped = []
-        for item in extracted_info:
-            key = _dedup_key(item)
-            if key in seen_keys:
-                logging.info(f"去重: 跳过重复凭证 {item.get('original_filename', '')} (key={key})")
-                continue
-            seen_keys.add(key)
-            deduped.append(item)
+        deduped = dedup_expense_items(extracted_info)
         if len(deduped) < len(extracted_info):
             logging.info(f"去重完成: {len(extracted_info)} -> {len(deduped)} 条（去除 {len(extracted_info) - len(deduped)} 条重复）")
         extracted_info = deduped

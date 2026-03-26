@@ -1,0 +1,20 @@
+[
+  {
+    "type": "didi",
+    "doc_type": "行程单",
+    "date": "2025-11-05",
+    "start_location": "田村",
+    "end_location": "北京南站-西",
+    "amount": 45.50,
+    "original_filename": "trip1.pdf"
+  },
+  {
+    "type": "didi",
+    "doc_type": "行程单",
+    "date": "2025-11-05",
+    "start_location": "田村",
+    "end_location": "北京西站-南",
+    "amount": 52.30,
+    "original_filename": "trip2.pdf"
+  }
+]
